@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="2022.SLDASM">
+  <link
+    name="base">
+    <inertial>
+      <origin
+        xyz="-0.115638965497453 0.00204379893919338 0.0384431159385299"
+        rpy="0 0 0" />
+      <mass
+        value="1.0057011827186" />
+      <inertia
+        ixx="0.000935637296282613"
+        ixy="-0.000520973559132852"
+        ixz="-9.55139820295701E-06"
+        iyy="0.00483011462652444"
+        iyz="3.59825593091546E-06"
+        izz="0.00551205508284216" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/base.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/base.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="jian">
+    <inertial>
+      <origin
+        xyz="0.0393647883496377 0.035419772528977 0.00433075612921222"
+        rpy="0 0 0" />
+      <mass
+        value="0.882810238107858" />
+      <inertia
+        ixx="0.00104231041753209"
+        ixy="0.000152627216347405"
+        ixz="-0.000178734696531232"
+        iyy="0.00172774269085124"
+        iyz="1.39322839843564E-05"
+        izz="0.00174319165081162" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/jian.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/jian.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="z1"
+    type="revolute">
+    <origin
+      xyz="0 0 0.04"
+      rpy="1.5708 0 0" />
+    <parent
+      link="base" />
+    <child
+      link="jian" />
+    <axis
+      xyz="0 -1 0" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="dabi">
+    <inertial>
+      <origin
+        xyz="0.255585674941351 0.00428706527615345 0.0100076855939568"
+        rpy="0 0 0" />
+      <mass
+        value="2.49044586477259" />
+      <inertia
+        ixx="0.00162346749828332"
+        ixy="-0.000216228277084887"
+        ixz="-7.42175863206187E-07"
+        iyy="0.0405637891930679"
+        iyz="-3.06270299287389E-06"
+        izz="0.0406595141977801" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/dabi.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/dabi.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="z2"
+    type="revolute">
+    <origin
+      xyz="0.099815 0.024 0.015429"
+      rpy="0 -0.15336 0" />
+    <parent
+      link="jian" />
+    <child
+      link="dabi" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="xiaobi">
+    <inertial>
+      <origin
+        xyz="0.0799852896657535 0.063124112437803 0.029887868734156"
+        rpy="0 0 0" />
+      <mass
+        value="1.37317350162791" />
+      <inertia
+        ixx="0.00199146791131481"
+        ixy="-0.000482603419982331"
+        ixz="-0.000410738629946192"
+        iyy="0.0055357089164681"
+        iyz="-7.45961277865241E-05"
+        izz="0.00460555144504269" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/xiaobi.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/xiaobi.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="z3"
+    type="revolute">
+    <origin
+      xyz="0.60499 0.003 0"
+      rpy="0 0.15336 0" />
+    <parent
+      link="dabi" />
+    <child
+      link="xiaobi" />
+    <axis
+      xyz="0.15276 0 -0.98826" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="shouwan">
+    <inertial>
+      <origin
+        xyz="0.175504959739604 0.0106787772075539 0.0395704188788814"
+        rpy="0 0 0" />
+      <mass
+        value="1.81863004196264" />
+      <inertia
+        ixx="0.00190814840311015"
+        ixy="-4.13887513390345E-05"
+        ixz="-0.00020549017958283"
+        iyy="0.00364279095253793"
+        iyz="-4.00860980391894E-06"
+        izz="0.00322546891582875" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/shouwan.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="../meshes/shouwan.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="z4"
+    type="revolute">
+    <origin
+      xyz="0.262514794001772 0.101603260796611 0.0405776103565703"
+      rpy="0 0 0" />
+    <parent
+      link="xiaobi" />
+    <child
+      link="shouwan" />
+    <axis
+      xyz="0.152758526148839 0 -0.988263544146416" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>
