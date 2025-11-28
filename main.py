@@ -4,7 +4,7 @@ import matplotlib.animation as animation
 from matplotlib.widgets import Slider, Button
 from mpl_toolkits.mplot3d import Axes3D
 
-# 导入你的自定义模块
+# 导入你的自定义模块 (确保这两个文件在同目录下)
 from robot_model import HydraulicSoftArmKinematics
 from ik_solver import IKSolver
 
@@ -16,13 +16,13 @@ class UnifiedRobotController:
         
         # 2. 状态定义
         self.MODES = ['MANUAL', 'AUTO', 'GRASP']
-        self.current_mode_idx = 0 # 默认 MANUAL
+        self.current_mode = 'MANUAL' # 当前模式名称
         self.time_step = 0.0
         
         # 3. 数据存储
         # [q1, q2, q3, q4(固定), bend, phi, len]
         self.current_q = [0, 0, -90, 0, 0, 0, 180] 
-        self.target_pos = np.array([600.0, 0.0, 400.0]) # 目标小球位置
+        self.target_pos = np.array([600.0, 0.0, 400.0]) 
         
         # 4. 初始化绘图
         self.fig = plt.figure(figsize=(15, 9))
@@ -31,17 +31,17 @@ class UnifiedRobotController:
         self.setup_visuals()
         self.setup_ui()
         
-        # 5. 绑定事件
+        # 5. 绑定键盘事件
         self.fig.canvas.mpl_connect('key_press_event', self.on_key_press)
         
         # 6. 启动循环
         self.ani = animation.FuncAnimation(self.fig, self.update_loop, interval=30, blit=False)
+        
+        # 初始高亮按钮
+        self.update_button_colors()
+        
         print("=== 系统启动 ===")
-        print("当前模式: MANUAL")
-        print("键盘控制 (仅在 GRASP 模式有效):")
-        print("  W/S: 前后移动 (X轴)")
-        print("  A/D: 左右移动 (Y轴)")
-        print("  Q/E: 上下移动 (Z轴)")
+        print("点击左上角按钮切换模式")
         plt.show()
 
     def setup_visuals(self):
@@ -57,32 +57,43 @@ class UnifiedRobotController:
         self.ax3d.plot([0,0], [0,0], [0, self.arm_model.base_z_offset], 'k-', lw=5, alpha=0.3)
         self.ax3d.scatter([0], [0], [0], s=300, c='black', marker='s')
         
-        # 动态组件 (保留引用以便更新)
+        # 动态组件
         self.viz_links, = self.ax3d.plot([], [], [], '-', lw=8, c='#4682B4', alpha=0.9, label='Rigid Arm')
-        self.viz_fixed, = self.ax3d.plot([], [], [], '-', lw=8, c='#505050', alpha=0.9, label='Fixed Ext')
-        self.viz_joints, = self.ax3d.plot([], [], [], 'o', ms=12, mfc='white', mec='black')
-        self.viz_soft,   = self.ax3d.plot([], [], [], '-', lw=10, c='#FF8C00', alpha=0.7, solid_capstyle='round', label='Soft Arm')
+        self.viz_fixed, = self.ax3d.plot([], [], [], '-', lw=8, c='#4682B4', alpha=0.9, label='Fixed Ext')
+        self.viz_joints, = self.ax3d.plot([], [], [], 'o', ms=10, mfc='white', mec='black')
+        self.viz_soft,   = self.ax3d.plot([], [], [], '-', lw=8, c='#FF8C00', alpha=0.9, solid_capstyle='round', label='Soft Arm')
         
-        # 目标小球 (仅在 GRASP 模式高亮)
-        self.viz_target, = self.ax3d.plot([], [], [], 'o', ms=15, c='gray', alpha=0.3, label='Target')
+        # 目标小球
+        self.viz_target, = self.ax3d.plot([], [], [], 'o', ms=6, c='gray', alpha=0.5, label='Target')
         
         # 地面
         xx, yy = np.meshgrid(range(-limit, limit+1, 600), range(-limit, limit+1, 600))
         zz = np.zeros_like(xx)
         self.ax3d.plot_surface(xx, yy, zz, color='gray', alpha=0.1)
-        self.ax3d.legend(loc='upper right')
         
         # 标题文本
         self.title_text = self.ax3d.text2D(0.05, 0.95, "Mode: MANUAL", transform=self.ax3d.transAxes, fontsize=16, weight='bold', color='blue')
 
     def setup_ui(self):
-        # 侧边栏背景
         axcolor = 'lightgoldenrodyellow'
         
-        # 模式切换按钮
-        ax_btn = plt.axes([0.05, 0.90, 0.20, 0.05])
-        self.btn_mode = Button(ax_btn, 'Switch Mode (Click)', color='lightblue', hovercolor='0.975')
-        self.btn_mode.on_clicked(self.toggle_mode)
+        # === 【修改点】创建三个独立的按钮 ===
+        # 位置格式: [left, bottom, width, height]
+        
+        # 1. MANUAL 按钮
+        ax_btn1 = plt.axes([0.05, 0.92, 0.08, 0.05])
+        self.btn_manual = Button(ax_btn1, 'Manual', color='white', hovercolor='0.9')
+        self.btn_manual.on_clicked(self.set_mode_manual)
+        
+        # 2. AUTO 按钮
+        ax_btn2 = plt.axes([0.14, 0.92, 0.08, 0.05])
+        self.btn_auto = Button(ax_btn2, 'Auto', color='white', hovercolor='0.9')
+        self.btn_auto.on_clicked(self.set_mode_auto)
+        
+        # 3. GRASP 按钮
+        ax_btn3 = plt.axes([0.23, 0.92, 0.08, 0.05])
+        self.btn_grasp = Button(ax_btn3, 'Grasp', color='white', hovercolor='0.9')
+        self.btn_grasp.on_clicked(self.set_mode_grasp)
         
         # 滑块配置
         self.sliders = []
@@ -96,131 +107,129 @@ class UnifiedRobotController:
             ('Soft Len', 140, 250, 180)
         ]
         
-        start_y = 0.80
+        start_y = 0.85
         for i, (label, vmin, vmax, vinit) in enumerate(slider_params):
             ax = plt.axes([0.05, start_y - i*0.06, 0.20, 0.03], facecolor=axcolor)
             s = Slider(ax, label, vmin, vmax, valinit=vinit)
-            s.on_changed(self.on_slider_manual) # 绑定手动事件
+            s.on_changed(self.on_slider_manual)
             self.sliders.append(s)
             
-        # 操作说明文本
-        plt.figtext(0.05, 0.35, "Controls:\n[MANUAL]: Use Sliders\n[AUTO]: Watch demo\n[GRASP]: W/A/S/D/Q/E to move ball", fontsize=10)
+        plt.figtext(0.05, 0.35, "Controls:\n[Grasp Mode]: Use ↑ ↓ ← → + - to move ball", fontsize=10)
 
-    # ================= 逻辑控制 =================
+    # ================= 模式切换逻辑 =================
     
-    def toggle_mode(self, event):
-        # 切换模式循环: MANUAL -> AUTO -> GRASP -> MANUAL
-        self.current_mode_idx = (self.current_mode_idx + 1) % 3
-        mode = self.MODES[self.current_mode_idx]
+    def set_mode_manual(self, event):
+        self.change_mode('MANUAL')
+
+    def set_mode_auto(self, event):
+        self.change_mode('AUTO')
+
+    def set_mode_grasp(self, event):
+        self.change_mode('GRASP')
+
+    def change_mode(self, new_mode):
+        self.current_mode = new_mode
+        self.update_button_colors() # 更新按钮颜色
         
-        # 更新UI外观
-        self.btn_mode.label.set_text(f"Mode: {mode}")
-        self.title_text.set_text(f"Mode: {mode}")
-        
-        if mode == 'MANUAL':
+        # 更新标题颜色和文字
+        self.title_text.set_text(f"Mode: {new_mode}")
+        if new_mode == 'MANUAL':
             self.title_text.set_color('blue')
             self.viz_target.set_color('gray')
             self.viz_target.set_alpha(0.3)
-        elif mode == 'AUTO':
+        elif new_mode == 'AUTO':
             self.title_text.set_color('purple')
             self.viz_target.set_color('gray')
             self.viz_target.set_alpha(0.3)
-        elif mode == 'GRASP':
+        elif new_mode == 'GRASP':
             self.title_text.set_color('green')
-            self.viz_target.set_color('#32CD32') # 亮绿色
+            self.viz_target.set_color('#32CD32')
             self.viz_target.set_alpha(1.0)
 
+    def update_button_colors(self):
+        # 辅助函数：根据当前模式高亮对应按钮
+        active_color = 'lightblue'
+        inactive_color = 'white'
+        
+        self.btn_manual.color = active_color if self.current_mode == 'MANUAL' else inactive_color
+        self.btn_auto.color = active_color if self.current_mode == 'AUTO' else inactive_color
+        self.btn_grasp.color = active_color if self.current_mode == 'GRASP' else inactive_color
+        
+        # 强制重绘按钮
+        self.btn_manual.hovercolor = self.btn_manual.color
+        self.btn_auto.hovercolor = self.btn_auto.color
+        self.btn_grasp.hovercolor = self.btn_grasp.color
+
+    # ================= 其他逻辑 (保持不变) =================
+
     def on_key_press(self, event):
-        # 仅在抓取模式下响应键盘
-        if self.MODES[self.current_mode_idx] != 'GRASP':
-            return
-            
-        step = 20.0 # 每次按键移动 20mm
-        key = event.key.lower()
-        
-        if key == 'w': self.target_pos[0] += step # 前
-        elif key == 's': self.target_pos[0] -= step # 后
-        elif key == 'a': self.target_pos[1] -= step # 左
-        elif key == 'd': self.target_pos[1] += step # 右
-        elif key == 'q': self.target_pos[2] += step # 上
-        elif key == 'e': self.target_pos[2] -= step # 下
-        
-        # 限制球不钻入地下
+        if self.current_mode != 'GRASP': return
+        step = 5.0
+        key = (event.key or '').lower()
+        # XY：方向键 或 小键盘 8/2/4/6
+        if key in ('up', '8'):
+            self.target_pos[0] += step
+        elif key in ('down', '2'):
+            self.target_pos[0] -= step
+        elif key in ('left', '4'):
+            self.target_pos[1] -= step
+        elif key in ('right', '6'):
+            self.target_pos[1] += step
+        # Z：小键盘 + / - （兼容多种键名）或主键盘 + / -
+        elif key in ('+', 'add', 'kp_add'):
+            self.target_pos[2] += step
+        elif key in ('-', 'subtract', 'kp_subtract'):
+            self.target_pos[2] -= step
+        # 保证高度不为负
         self.target_pos[2] = max(0, self.target_pos[2])
 
     def on_slider_manual(self, val):
-        # 只有在手动模式下，滑块的值才直接驱动机械臂
-        if self.MODES[self.current_mode_idx] == 'MANUAL':
-            # 读取滑块值构建向量
+        if self.current_mode == 'MANUAL':
             vals = [s.val for s in self.sliders]
-            # 补全向量: [q1, q2, q3, 0, bend, phi, len]
             self.current_q = vals[:3] + [0] + vals[3:]
 
     def update_sliders_visual(self, q_vector):
-        """
-        在自动或抓取模式下，反向更新滑块的显示位置，
-        这样切换回手动模式时，滑块不会跳变。
-        """
-        # q_vector: [q1, q2, q3, 0, bend, phi, len]
-        # Sliders:  [q1, q2, q3,    bend, phi, len]
-        indices = [0, 1, 2, 4, 5, 6] # 对应滑块的索引
-        
+        indices = [0, 1, 2, 4, 5, 6]
         for i, slider_idx in enumerate(indices):
-            self.sliders[i].eventson = False # 暂时关闭回调，防止死循环
+            self.sliders[i].eventson = False
             self.sliders[i].set_val(q_vector[slider_idx])
             self.sliders[i].eventson = True
 
-    # ================= 主循环 =================
-    
     def update_loop(self, frame):
-        mode = self.MODES[self.current_mode_idx]
         self.time_step += 0.05
         
-        # --- 策略 1: 自动波形 ---
-        if mode == 'AUTO':
+        if self.current_mode == 'AUTO':
             t = self.time_step
-            # 生成正弦波动作
             q1 = np.sin(t*0.5) * 45
             q2 = np.sin(t*0.5 + 1) * 30 + 10
             q3 = np.sin(t*0.6 + 2) * 40 - 90
             bend = (np.sin(t) + 1) * 50
             phi = (t * 50) % 360 - 180
             length = 180 + np.sin(t*2) * 40
-            
             self.current_q = [q1, q2, q3, 0, bend, phi, length]
             self.update_sliders_visual(self.current_q)
             
-        # --- 策略 2: 抓取模式 (键盘控制球) ---
-        elif mode == 'GRASP':
-            # 调用 IK 求解器去追球
+        elif self.current_mode == 'GRASP':
             self.current_q = self.ik_solver.solve(self.target_pos, self.current_q)
             self.update_sliders_visual(self.current_q)
             
-        # --- 策略 3: 手动模式 ---
-        # 手动模式下，数据已经在 on_slider_manual 中更新了，这里只需重绘
-        
-        # --- 统一绘图 ---
+        # 绘图更新
         r_pts, s_pts, _, _ = self.arm_model.forward_kinematics(self.current_q)
         
-        # 1. 更新刚性臂
         self.viz_links.set_data(r_pts[0:4, 0], r_pts[0:4, 1])
         self.viz_links.set_3d_properties(r_pts[0:4, 2])
-        
         self.viz_fixed.set_data(r_pts[3:5, 0], r_pts[3:5, 1])
         self.viz_fixed.set_3d_properties(r_pts[3:5, 2])
-        
         self.viz_joints.set_data(r_pts[1:4, 0], r_pts[1:4, 1])
         self.viz_joints.set_3d_properties(r_pts[1:4, 2])
         
-        # 2. 更新软体臂
         sx = np.concatenate(([r_pts[-1,0]], s_pts[:,0]))
         sy = np.concatenate(([r_pts[-1,1]], s_pts[:,1]))
         sz = np.concatenate(([r_pts[-1,2]], s_pts[:,2]))
         self.viz_soft.set_data(sx, sy)
         self.viz_soft.set_3d_properties(sz)
         
-        # 3. 更新目标小球 (如果在抓取模式)
-        if mode == 'GRASP':
+        if self.current_mode == 'GRASP':
             self.viz_target.set_data([self.target_pos[0]], [self.target_pos[1]])
             self.viz_target.set_3d_properties([self.target_pos[2]])
         
