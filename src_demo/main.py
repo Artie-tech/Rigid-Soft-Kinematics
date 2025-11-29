@@ -1,3 +1,16 @@
+"""
+文件功能：主程序入口与可视化界面
+
+本文件是整个仿真项目的启动入口。它负责：
+1.  创建并集成各个模块，如机器人模型 (`robot_model`)、逆运动学求解器 (`ik_solver`) 和任务规划器 (`task_planner`)。
+2.  使用 `matplotlib` 构建一个交互式的 3D 可视化界面，用于实时显示机械臂的运动。
+3.  实现用户交互逻辑，包括：
+    - 通过滑块手动控制每个关节。
+    - 切换不同的操作模式（如手动、自动轨迹、IK 抓取）。
+    - 响应键盘事件，用于在抓取模式下控制目标点的位置。
+4.  管理主更新循环 (`update_loop`)，根据当前模式驱动机械臂的运动和仿真。
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -45,10 +58,18 @@ class UnifiedRobotController:
         plt.show()
 
     def setup_visuals(self):
-        limit = 1200
-        self.ax3d.set_xlim(-limit, limit)
-        self.ax3d.set_ylim(-limit, limit)
-        self.ax3d.set_zlim(0, 1800)
+        xlimit_max = 800
+        xlimit_min = -200
+
+        ylimit_max = 700
+        ylimit_min = -400
+        
+        zlimit_max = 1200
+        zlimit_min = 0
+
+        self.ax3d.set_xlim(xlimit_min, xlimit_max)
+        self.ax3d.set_ylim(ylimit_min, ylimit_max)
+        self.ax3d.set_zlim(zlimit_min, zlimit_max)
         self.ax3d.set_xlabel('X')
         self.ax3d.set_ylabel('Y')
         self.ax3d.set_zlabel('Z')
@@ -67,12 +88,19 @@ class UnifiedRobotController:
         self.viz_target, = self.ax3d.plot([], [], [], 'o', ms=6, c='gray', alpha=0.5, label='Target')
         
         # 地面
-        xx, yy = np.meshgrid(range(-limit, limit+1, 600), range(-limit, limit+1, 600))
+        xx, yy = np.meshgrid(range(xlimit_min, xlimit_max+1, 600), range(ylimit_min, ylimit_max+1, 600))
         zz = np.zeros_like(xx)
         self.ax3d.plot_surface(xx, yy, zz, color='gray', alpha=0.1)
         
         # 标题文本
         self.title_text = self.ax3d.text2D(0.05, 0.95, "Mode: MANUAL", transform=self.ax3d.transAxes, fontsize=16, weight='bold', color='blue')
+
+        # 末端坐标轴
+        self.viz_tip_axes = []
+        colors = ['r', 'g', 'b']
+        for c in colors:
+            line, = self.ax3d.plot([], [], [], '-', lw=2, c=c)
+            self.viz_tip_axes.append(line)
 
     def setup_ui(self):
         axcolor = 'lightgoldenrodyellow'
@@ -200,9 +228,9 @@ class UnifiedRobotController:
         
         if self.current_mode == 'AUTO':
             t = self.time_step
-            q1 = np.sin(t*0.5) * 45
-            q2 = np.sin(t*0.5 + 1) * 30 + 10
-            q3 = np.sin(t*0.6 + 2) * 40 - 90
+            q1 = np.sin(t*0.1) * 45
+            q2 = np.sin(t*0.1 + 1) * 30 + 10
+            q3 = np.sin(t*0.1 + 2) * 40 - 90
             bend = (np.sin(t) + 1) * 50
             phi = (t * 50) % 360 - 180
             length = 180 + np.sin(t*2) * 40
@@ -214,7 +242,7 @@ class UnifiedRobotController:
             self.update_sliders_visual(self.current_q)
             
         # 绘图更新
-        r_pts, s_pts, _, _ = self.arm_model.forward_kinematics(self.current_q)
+        r_pts, s_pts, _, T_tip = self.arm_model.forward_kinematics(self.current_q)
         
         self.viz_links.set_data(r_pts[0:4, 0], r_pts[0:4, 1])
         self.viz_links.set_3d_properties(r_pts[0:4, 2])
@@ -229,6 +257,16 @@ class UnifiedRobotController:
         self.viz_soft.set_data(sx, sy)
         self.viz_soft.set_3d_properties(sz)
         
+        # 更新末端坐标轴
+        axis_len = 50 # 坐标轴长度
+        origin = T_tip[:3, 3]
+        for i in range(3):
+            axis_vec = T_tip[:3, i]
+            end_point = origin + axis_len * axis_vec
+            line = self.viz_tip_axes[i]
+            line.set_data([origin[0], end_point[0]], [origin[1], end_point[1]])
+            line.set_3d_properties([origin[2], end_point[2]])
+
         if self.current_mode == 'GRASP':
             self.viz_target.set_data([self.target_pos[0]], [self.target_pos[1]])
             self.viz_target.set_3d_properties([self.target_pos[2]])

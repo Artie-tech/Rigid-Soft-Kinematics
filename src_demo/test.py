@@ -1,3 +1,18 @@
+"""
+文件功能：通用测试脚本
+
+本文件是一个通用的、临时的测试脚本。
+其主要目的是为了快速验证、调试或演示项目中的某个特定功能、算法或模块，而不需要运行完整的主程序。
+
+例如，您可以在这里：
+- 单独测试 `robot_model.py` 中的正向运动学。
+- 验证 `ik_solver.py` 在特定目标下的求解效果。
+- 检查 `task_planner.py` 生成的轨迹点是否符合预期。
+- 运行任何与项目相关的小实验。
+
+这是一个“草稿纸”性质的文件，其内容可以根据当前的测试需求随时更改。
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D

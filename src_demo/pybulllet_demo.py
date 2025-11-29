@@ -1,3 +1,18 @@
+"""
+文件功能：基于 PyBullet 的物理仿真演示
+
+本文件旨在使用 PyBullet 物理引擎来加载和模拟机械臂模型。
+与 `main.py` 中基于 `matplotlib` 的纯运动学可视化不同，此文件侧重于物理仿真。
+
+主要功能：
+- 初始化 PyBullet 物理环境。
+- 加载 URDF (Unified Robot Description Format) 文件来定义机器人模型。
+- 在仿真环境中创建交互式控件（如滑块），用于控制机器人的关节角度。
+- 运行物理仿真循环，实时更新机器人的状态并渲染。
+
+目的：用于验证 URDF 模型的正确性，并进行简单的物理交互测试。
+"""
+
 import pybullet as p
 import pybullet_data
 import time
