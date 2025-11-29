@@ -4,146 +4,186 @@ from robot_model import HydraulicSoftArmKinematics
 class IKSolver:
     def __init__(self):
         self.model = HydraulicSoftArmKinematics()
-        self.learning_rate = 0.8 
         # 刚性关节限位 (Rad)
         self.limits_rad = [
             np.deg2rad([-60, 60]),   # J1: 基座
             np.deg2rad([-28, 90]),   # J2: 大臂
             np.deg2rad([-152, -42])  # J3: 小臂
         ]
-        # 软体臂的伸缩范围 (mm)
-        self.soft_range = [140.0, 250.0]
+        # 软体臂的物理限制
+        self.soft_len_range = [140.0, 250.0] # 长度范围 (mm)
+        self.soft_bend_max = 130.0           # 最大弯曲角度 (deg)
 
     def solve(self, target_pos, current_q_deg):
+        """
+        主求解函数
+        :param target_pos: 全局目标坐标 [x, y, z]
+        :param current_q_deg: 当前所有关节角度 (7维)
+        """
         target = np.array(target_pos)
         
-        # 尝试求解。如果第一次失败（陷入局部极小值），尝试随机姿态重启
-        # 我们最多尝试 3 次重启，保证实时性
-        best_q = None
-        min_error = float('inf')
-        
-        # 第一次尝试：从当前角度开始 (利用时间连续性)
+        # 策略：如果当前姿态微调就能到，就直接算；否则尝试随机重启避免局部极小值
         seeds = [current_q_deg[:3]]
-        # 后续尝试：加入随机种子 (在限位范围内随机采样)
+        
+        # 增加随机种子，帮助跳出死锁
         for _ in range(2):
             random_q = [np.random.uniform(l[0], l[1]) for l in self.limits_rad]
             seeds.append(np.degrees(random_q))
 
+        best_q_full = None
+        min_total_error = float('inf')
+
         for start_q in seeds:
-            q_res, error = self._gradient_descent_range(target, start_q)
+            # 1. 刚性臂粗调：将软体臂基座送到合适位置
+            rigid_q_res, range_error = self._optimize_rigid_base(target, start_q)
             
-            # 如果成功进入范围，直接返回
-            if error < 5.0:
-                return self._compose_result(target, q_res)
+            # 2. 软体臂精调：基于几何解析法计算软体参数
+            final_q_full, tip_error = self._solve_soft_geometric(target, rigid_q_res)
             
-            # 否则记录最优解，以此保底
-            if error < min_error:
-                min_error = error
-                best_q = q_res
+            # 3. 评估总误差
+            if tip_error < 2.0: # 精度满足要求 (2mm)
+                return final_q_full
+            
+            if tip_error < min_total_error:
+                min_total_error = tip_error
+                best_q_full = final_q_full
 
-        # 如果都试过了还是不行，就用那个“离得最近”的解
-        return self._compose_result(target, best_q)
+        return best_q_full
 
-    def _gradient_descent_range(self, target, start_q_deg):
+    def _optimize_rigid_base(self, target, start_q_deg):
         """
-        核心算法：范围约束 IK
-        目标不是重合，而是让 distance 在 [min_len, max_len] 之间
+        刚性臂优化：目标不是重合，而是让 Target 落入软体臂的“可达甜区”
+        甜区定义：以刚性末端为球心，半径为软体臂长度中值 (约 200mm) 的球壳
         """
         q = np.array([np.deg2rad(v) for v in start_q_deg])
-        final_error = float('inf')
-
-        for _ in range(15): # 增加迭代次数以换取精度
-            # 1. 正向运动学获取刚性末端
-            q_calc = np.degrees(q).tolist() + [0, 0, 0, 200]
+        
+        # 理想的软体臂长度 (取中间值，留出伸缩余量)
+        ideal_reach = (self.soft_len_range[0] + self.soft_len_range[1]) / 2.0
+        
+        for _ in range(20): # 迭代次数
+            # FK 计算刚性末端 (软体部分设为 0)
+            q_calc = np.degrees(q).tolist() + [0, 0, 0, 0] 
             r_pts, _, _, _ = self.model.forward_kinematics(q_calc)
-            current_tip = r_pts[-1]
+            current_base = r_pts[-1] # 刚性末端 = 软体基座
             
-            # 2. 计算距离向量
-            diff_vec = target - current_tip
-            dist = np.linalg.norm(diff_vec)
+            # 向量：从软体基座指向目标
+            vec_to_target = target - current_base
+            dist = np.linalg.norm(vec_to_target)
             
-            # 3. 【核心改进】范围误差计算
-            # 我们不要求 dist = 160，只要求 140 < dist < 250
-            if dist < self.soft_range[0]:
-                # 太近了，需要退后。目标距离设为下限
-                target_dist = self.soft_range[0]
-            elif dist > self.soft_range[1]:
-                # 太远了，需要前进。目标距离设为上限
-                target_dist = self.soft_range[1]
-            else:
-                # 在射程范围内！不需要刚性臂动了，误差为0
-                target_dist = dist
+            # 误差逻辑：我们需要 dist 接近 ideal_reach
+            # 这里的误差是标量误差，我们希望 dist = ideal_reach
+            dist_error = dist - ideal_reach
             
-            # 构造一个虚拟目标点：沿着连线方向，距离刚性末端 target_dist 的位置
-            if dist > 1e-4:
-                direction = diff_vec / dist
-                # 刚性臂希望到达的位置 = 目标物体位置 - 理想的伸长向量
-                desired_tip_pos = target - direction * target_dist
-            else:
-                desired_tip_pos = current_tip
-
-            # 计算位移误差
-            error_vec = desired_tip_pos - current_tip
-            error_val = np.linalg.norm(error_vec)
-            final_error = error_val
-            
-            # 如果误差足够小（刚性臂已经把软体臂送到了射程内），停止迭代
-            if error_val < 5.0:
+            if abs(dist_error) < 5.0: # 已经进入理想区间
                 break
-
-            # 4. 雅可比迭代 (DLS)
+                
+            # 构造虚拟力：
+            # 如果太远 (dist > ideal)，刚性臂需要向目标移动
+            # 如果太近 (dist < ideal)，刚性臂需要远离目标
+            # 移动方向沿着 vec_to_target
+            direction = vec_to_target / (dist + 1e-6)
+            
+            # 我们希望刚性末端移动到的位置
+            desired_base_pos = target - direction * ideal_reach
+            
+            # 计算 Cartesian 误差向量
+            cartesian_error = desired_base_pos - current_base
+            
+            # --- 雅可比迭代 (DLS) ---
             J = np.zeros((3, 3))
             delta = 0.001
             for i in range(3):
                 q_temp = q.copy()
                 q_temp[i] += delta
-                q_full_temp = np.degrees(q_temp).tolist() + [0, 0, 0, 200]
+                q_full_temp = np.degrees(q_temp).tolist() + [0, 0, 0, 0]
                 r_pts_temp, _, _, _ = self.model.forward_kinematics(q_full_temp)
-                J[:, i] = (r_pts_temp[-1] - current_tip) / delta
+                J[:, i] = (r_pts_temp[-1] - current_base) / delta
             
-            # DLS 求解
-            lambda_sq = 0.04 # 阻尼系数
-            dq = np.linalg.inv(J.T @ J + lambda_sq * np.eye(3)) @ J.T @ error_vec
+            # 阻尼最小二乘求解
+            lambda_sq = 0.1
+            dq = np.linalg.inv(J.T @ J + lambda_sq * np.eye(3)) @ J.T @ cartesian_error
             
-            # 5. 更新并限位
             q += dq
+            # 关节限位
             for i in range(3):
                 q[i] = np.clip(q[i], self.limits_rad[i][0], self.limits_rad[i][1])
-        
-        return np.degrees(q), final_error
+                
+        return np.degrees(q), abs(dist - ideal_reach)
 
-    def _compose_result(self, target, rigid_q_deg):
+    def _solve_soft_geometric(self, target, rigid_q_deg):
         """
-        根据计算出的刚性臂角度，自动适配软体臂的参数(弯曲、旋转、伸长)
+        软体臂解析解：根据刚性末端位置，计算软体臂所需的弯曲、旋转和长度
+        这是一个纯几何过程，不需要迭代。
         """
-        # 1. 获取刚性末端位置和姿态
-        q_full = rigid_q_deg.tolist() + [0, 0, 0, 200]
-        r_pts, _, T_base_soft, _ = self.model.forward_kinematics(q_full)
-        soft_base_pos = r_pts[-1]
-        R_base = T_base_soft[:3, :3]
+        # 1. 获取刚性末端的变换矩阵 (姿态很重要)
+        q_dummy = rigid_q_deg.tolist() + [0, 0, 0, 0]
+        _, _, T_base_soft, _ = self.model.forward_kinematics(q_dummy)
         
-        # 2. 计算软体参数
-        vec_to_target = target - soft_base_pos
-        dist = np.linalg.norm(vec_to_target)
-        vec_local = R_base.T @ vec_to_target # 转到局部坐标
+        soft_base_pos = T_base_soft[:3, 3]
+        R_base = T_base_soft[:3, :3] # 软体基座的旋转矩阵
         
-        # Phi (旋转): 对准目标
-        new_phi = np.degrees(np.arctan2(vec_local[2], vec_local[1]))
+        # 2. 将目标点转换到软体臂的【局部坐标系】
+        # 这一点至关重要！所有的 PCC 计算都在局部系完成
+        vec_global = target - soft_base_pos
+        vec_local = R_base.T @ vec_global  # [x, y, z]
         
-        # Length (伸缩): 刚好够到目标，限制在物理范围内
-        new_len = np.clip(dist, self.soft_range[0], self.soft_range[1])
+        x, y, z = vec_local
         
-        # Bend (弯曲): 
-        # 逻辑优化：只有当刚性臂确实把基座送到了距离目标 < 260 的地方，才开始弯曲
-        # 如果距离太远(>260)，说明根本够不着，保持直的(0)
-        if dist > self.soft_range[1] + 20: 
-            new_bend = 0
-        elif dist < 50: 
-            new_bend = 120
+        # 注意：根据 robot_model.py，软体臂沿 X 轴生长 (s 对应 x)
+        # y, z 是横截面偏移
+        
+        # --- A. 计算 Phi (旋转角) ---
+        # 决定弯曲平面的方向
+        phi_rad = np.arctan2(z, y)
+        phi_deg = np.degrees(phi_rad)
+        
+        # --- B. 计算几何参数 ---
+        # 投影到弯曲平面后的“高度” h (偏离 X 轴的距离)
+        h = np.sqrt(y**2 + z**2)
+        # 沿主轴的距离
+        d_x = x
+        
+        # --- C. 计算 Bend (弯曲角 Theta) 和 Length (弧长 S) ---
+        # 几何关系：恒定曲率圆弧经过 (0,0) 和 (d_x, h)
+        # 圆弧方程推导：
+        # 半径 R, 弯曲角 theta. 
+        # 弦长 chord = sqrt(d_x^2 + h^2)
+        # theta = 2 * atan2(h, d_x)  <-- PCC 几何核心公式
+        
+        if h < 1e-4: 
+            # 直线情况
+            theta_rad = 0
+            arc_length = d_x
         else:
-            # 距离越近，弯得越多，模拟抓取
-            # 归一化距离: 250 -> 0, 50 -> 1
-            ratio = 1.0 - (dist - 50) / (250 - 50)
-            new_bend = np.clip(ratio * 120, 0, 120)
+            # 曲线情况
+            theta_rad = 2 * np.arctan2(h, d_x)
+            
+            # 避免除以零或数值不稳定
+            if abs(theta_rad) < 1e-4:
+                arc_length = d_x
+            else:
+                # 半径 R = h / (1 - cos(theta)) ??? 不对，那是另一种参数化
+                # 使用更稳健的公式：R = L / theta -> L = R * theta
+                # 几何推导：R = (d_x^2 + h^2) / (2*h)
+                R = (d_x**2 + h**2) / (2 * h)
+                arc_length = R * theta_rad
 
-        return rigid_q_deg.tolist() + [0, new_bend, new_phi, new_len]
+        # --- D. 约束检查与修正 ---
+        theta_deg = np.degrees(theta_rad)
+        
+        # 1. 长度限制
+        final_len = np.clip(arc_length, self.soft_len_range[0], self.soft_len_range[1])
+        
+        # 2. 角度限制
+        final_bend = np.clip(theta_deg, -self.soft_bend_max, self.soft_bend_max)
+        
+        # 构造最终指令
+        final_q = rigid_q_deg.tolist() + [0, final_bend, phi_deg, final_len]
+        
+        # --- E. 验证误差 ---
+        # 使用正向运动学验证一下最终位置
+        _, _, _, T_tip_real = self.model.forward_kinematics(final_q)
+        tip_real = T_tip_real[:3, 3]
+        error = np.linalg.norm(target - tip_real)
+        
+        return final_q, error

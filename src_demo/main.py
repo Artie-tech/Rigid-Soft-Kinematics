@@ -58,8 +58,8 @@ class UnifiedRobotController:
         plt.show()
 
     def setup_visuals(self):
-        xlimit_max = 800
-        xlimit_min = -200
+        xlimit_max = 1000
+        xlimit_min = -400
 
         ylimit_max = 700
         ylimit_min = -400
@@ -88,7 +88,7 @@ class UnifiedRobotController:
         self.viz_target, = self.ax3d.plot([], [], [], 'o', ms=6, c='gray', alpha=0.5, label='Target')
         
         # 地面
-        xx, yy = np.meshgrid(range(xlimit_min, xlimit_max+1, 600), range(ylimit_min, ylimit_max+1, 600))
+        xx, yy = np.meshgrid(range(xlimit_min-50, xlimit_max+50, 600), range(ylimit_min, ylimit_max+100, 600))
         zz = np.zeros_like(xx)
         self.ax3d.plot_surface(xx, yy, zz, color='gray', alpha=0.1)
         
@@ -130,7 +130,7 @@ class UnifiedRobotController:
             ('J2 Shoulder', -28, 90, 0),
             ('J3 Elbow', -152, -42, -90),
             # J4 Fixed
-            ('Soft Bend', 0, 120, 0),
+            ('Soft Bend', -120, 120, 0),
             ('Soft Phi', -180, 180, 0),
             ('Soft Len', 140, 250, 180)
         ]
@@ -231,7 +231,8 @@ class UnifiedRobotController:
             q1 = np.sin(t*0.1) * 45
             q2 = np.sin(t*0.1 + 1) * 30 + 10
             q3 = np.sin(t*0.1 + 2) * 40 - 90
-            bend = (np.sin(t) + 1) * 50
+            bend = (np.sin(0.1*t)) * 80
+            bend = np.clip(bend, -120, 120)  # 限制弯曲度
             phi = (t * 50) % 360 - 180
             length = 180 + np.sin(t*2) * 40
             self.current_q = [q1, q2, q3, 0, bend, phi, length]
