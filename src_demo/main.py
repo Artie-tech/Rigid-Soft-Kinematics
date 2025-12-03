@@ -1,45 +1,89 @@
 """
-文件功能：主程序入口与可视化界面
+文件功能：主程序入口与可视化界面 (UI优化版)
 
-本文件是整个仿真项目的启动入口。它负责：
-1.  创建并集成各个模块，如机器人模型 (`robot_model`)、逆运动学求解器 (`ik_solver`) 和任务规划器 (`task_planner`)。
-2.  使用 `matplotlib` 构建一个交互式的 3D 可视化界面，用于实时显示机械臂的运动。
-3.  实现用户交互逻辑，包括：
-    - 通过滑块手动控制每个关节。
-    - 切换不同的操作模式（如手动、自动轨迹、IK 抓取）。
-    - 响应键盘事件，用于在抓取模式下控制目标点的位置。
-4.  管理主更新循环 (`update_loop`)，根据当前模式驱动机械臂的运动和仿真。
+更新日志：
+1. 恢复了末端坐标轴 (RGB Axes) 的显示。
+2. 增大了模式选择按钮的尺寸和字体，便于点击。
+3. 包含了 TrajectoryPlanner 轨迹规划功能。
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from matplotlib.widgets import Slider, Button
+from matplotlib.widgets import Slider, Button, RadioButtons
 from mpl_toolkits.mplot3d import Axes3D
 
-# 导入你的自定义模块 (确保这两个文件在同目录下)
+# 导入你的自定义模块
 from robot_model import HydraulicSoftArmKinematics
 from ik_solver import IKSolver
 
+# ==========================================
+#  轨迹规划器类
+# ==========================================
+class TrajectoryPlanner:
+    def __init__(self):
+        self.center = np.array([1000.0, 100.0, 300.0]) # 默认轨迹中心
+        self.radius = 150.0
+        self.period = 10.0 # 周期(秒)
+        self.type = 'NONE' # 当前轨迹类型
+        
+    def get_path_points(self, traj_type, steps=100):
+        """生成用于绘制 3D 红线的静态路径点"""
+        t = np.linspace(0, 1, steps) * self.period
+        points = []
+        for ti in t:
+            points.append(self.calculate_pos(traj_type, ti))
+        return np.array(points)
+
+    def calculate_pos(self, traj_type, current_time):
+        """根据当前时间计算目标点坐标 (x, y, z)"""
+        w = 2 * np.pi * (current_time % self.period) / self.period
+        x, y, z = self.center
+        r = self.radius
+
+        if traj_type == 'CIRCLE':
+            x = self.center[0] + r * np.cos(w)
+            y = self.center[1] + r * np.sin(w)
+            z = self.center[2]
+            
+        elif traj_type == 'FIG8':
+            scale = r * 1.2
+            y = self.center[1] + scale * np.sin(w)
+            z = self.center[2] + scale * np.sin(2 * w) / 2.0
+            x = self.center[0] 
+            
+        elif traj_type == 'SPIRAL':
+            r_spiral = r * 0.8
+            z = self.center[2] + r_spiral * np.sin(w)
+            y = self.center[1] + r_spiral * np.cos(w)
+            x = self.center[0] + 100 * np.sin(2 * w)
+            
+        return np.array([x, y, z])
+
+# ==========================================
+#  主控制器类
+# ==========================================
 class UnifiedRobotController:
     def __init__(self):
         # 1. 初始化核心模块
         self.arm_model = HydraulicSoftArmKinematics()
         self.ik_solver = IKSolver()
+        self.planner = TrajectoryPlanner()
         
         # 2. 状态定义
-        self.MODES = ['MANUAL', 'AUTO', 'GRASP']
-        self.current_mode = 'MANUAL' # 当前模式名称
+        self.current_mode = 'MANUAL' 
         self.time_step = 0.0
+        self.is_traj_running = False
         
         # 3. 数据存储
-        # [q1, q2, q3, q4(固定), bend, phi, len]
         self.current_q = [0, 0, -90, 0, 0, 0, 180] 
-        self.target_pos = np.array([600.0, 0.0, 400.0]) 
+        self.target_pos = self.planner.center.copy()
         
         # 4. 初始化绘图
-        self.fig = plt.figure(figsize=(15, 9))
-        self.ax3d = plt.axes([0.35, 0.05, 0.60, 0.90], projection='3d')
+        self.fig = plt.figure(figsize=(16, 9))
+        # 调整布局: [left, bottom, width, height]
+        # 给右侧留出更多空间 (0.70 -> 0.65 width)
+        self.ax3d = plt.axes([0.02, 0.05, 0.65, 0.90], projection='3d')
         
         self.setup_visuals()
         self.setup_ui()
@@ -50,166 +94,141 @@ class UnifiedRobotController:
         # 6. 启动循环
         self.ani = animation.FuncAnimation(self.fig, self.update_loop, interval=30, blit=False)
         
-        # 初始高亮按钮
-        self.update_button_colors()
-        
         print("=== 系统启动 ===")
-        print("点击左上角按钮切换模式")
+        print("模式说明:")
+        print("  MANUAL: 滑块控制关节")
+        print("  IK-POINT: 键盘控制目标点，IK 求解")
+        print("  TRAJ-*: 自动沿预设轨迹运行 (可用键盘调整中心)")
         plt.show()
 
     def setup_visuals(self):
-        xlimit_max = 1000
-        xlimit_min = -400
-
-        ylimit_max = 700
-        ylimit_min = -400
+        limit = 1000
+        self.ax3d.set_xlim(-200, 1200)
+        self.ax3d.set_ylim(-800, 800)
+        self.ax3d.set_zlim(0, 1200)
+        self.ax3d.set_xlabel('X'); self.ax3d.set_ylabel('Y'); self.ax3d.set_zlabel('Z')
         
-        zlimit_max = 1200
-        zlimit_min = 0
-
-        self.ax3d.set_xlim(xlimit_min, xlimit_max)
-        self.ax3d.set_ylim(ylimit_min, ylimit_max)
-        self.ax3d.set_zlim(zlimit_min, zlimit_max)
-        self.ax3d.set_xlabel('X')
-        self.ax3d.set_ylabel('Y')
-        self.ax3d.set_zlabel('Z')
-        
-        # 静态环境
+        # 静态组件
         self.ax3d.plot([0,0], [0,0], [0, self.arm_model.base_z_offset], 'k-', lw=5, alpha=0.3)
         self.ax3d.scatter([0], [0], [0], s=300, c='black', marker='s')
         
-        # 动态组件
-        self.viz_links, = self.ax3d.plot([], [], [], '-', lw=8, c='#4682B4', alpha=0.9, label='Rigid Arm')
-        self.viz_fixed, = self.ax3d.plot([], [], [], '-', lw=8, c='#4682B4', alpha=0.9, label='Fixed Ext')
-        self.viz_joints, = self.ax3d.plot([], [], [], 'o', ms=10, mfc='white', mec='black')
-        self.viz_soft,   = self.ax3d.plot([], [], [], '-', lw=8, c='#FF8C00', alpha=0.9, solid_capstyle='round', label='Soft Arm')
+        # 机械臂组件
+        self.viz_links, = self.ax3d.plot([], [], [], '-', lw=6, c='#4682B4', alpha=0.9, label='Rigid')
+        self.viz_fixed, = self.ax3d.plot([], [], [], '-', lw=6, c='#5F9EA0', alpha=0.9)
+        self.viz_joints, = self.ax3d.plot([], [], [], 'o', ms=8, mfc='white', mec='black')
+        self.viz_soft,   = self.ax3d.plot([], [], [], '-', lw=8, c='#FF8C00', solid_capstyle='round', label='Soft')
         
-        # 目标小球
-        self.viz_target, = self.ax3d.plot([], [], [], 'o', ms=6, c='gray', alpha=0.5, label='Target')
+        # 目标与轨迹
+        self.viz_target, = self.ax3d.plot([], [], [], 'o', ms=10, c='red', alpha=0.8, label='Target')
+        self.viz_path,   = self.ax3d.plot([], [], [], '--', lw=1.5, c='red', alpha=0.5)
         
-        # 地面
-        xx, yy = np.meshgrid(range(xlimit_min-50, xlimit_max+50, 600), range(ylimit_min, ylimit_max+100, 600))
-        zz = np.zeros_like(xx)
-        self.ax3d.plot_surface(xx, yy, zz, color='gray', alpha=0.1)
-        
-        # 标题文本
-        self.title_text = self.ax3d.text2D(0.05, 0.95, "Mode: MANUAL", transform=self.ax3d.transAxes, fontsize=16, weight='bold', color='blue')
-
-        # 末端坐标轴
+        # --- 【恢复】末端坐标轴 (RGB) ---
         self.viz_tip_axes = []
         colors = ['r', 'g', 'b']
         for c in colors:
-            line, = self.ax3d.plot([], [], [], '-', lw=2, c=c)
+            # 初始化三条线，分别代表 x, y, z 轴
+            line, = self.ax3d.plot([], [], [], '-', lw=3, c=c)
             self.viz_tip_axes.append(line)
+        
+        # 地面
+        xx, yy = np.meshgrid(range(-500, 1500, 1000), range(-600, 1200, 1000))
+        self.ax3d.plot_surface(xx, yy, np.zeros_like(xx), color='gray', alpha=0.1)
+        
+        # 信息文本
+        self.text_info = self.ax3d.text2D(0.02, 0.95, "Mode: MANUAL", transform=self.ax3d.transAxes, fontsize=14, color='blue')
 
     def setup_ui(self):
-        axcolor = 'lightgoldenrodyellow'
+        # 右侧控制面板区域设置
+        panel_left = 0.72  # 向左移一点，变宽
+        panel_width = 0.20 # 增加宽度
         
-        # === 【修改点】创建三个独立的按钮 ===
-        # 位置格式: [left, bottom, width, height]
+        # 1. 模式选择 (Radio Button)
+        # 【修改】增大高度 (0.15 -> 0.25)，防止按钮挤在一起
+        ax_mode = plt.axes([panel_left, 0.65, panel_width, 0.25], facecolor='#f0f0f0')
+        self.radio_mode = RadioButtons(ax_mode, ('MANUAL', 'IK-POINT', 'TRAJ-CIRCLE', 'TRAJ-FIG8', 'TRAJ-SPIRAL'))
+        self.radio_mode.on_clicked(self.on_mode_change)
         
-        # 1. MANUAL 按钮
-        ax_btn1 = plt.axes([0.05, 0.92, 0.08, 0.05])
-        self.btn_manual = Button(ax_btn1, 'Manual', color='white', hovercolor='0.9')
-        self.btn_manual.on_clicked(self.set_mode_manual)
+        # 设置标题和字体大小
+        ax_mode.set_title("Operation Mode", fontsize=12, pad=10)
+        # 遍历标签，调大字体
+        for label in self.radio_mode.labels:
+            label.set_fontsize(11) 
         
-        # 2. AUTO 按钮
-        ax_btn2 = plt.axes([0.14, 0.92, 0.08, 0.05])
-        self.btn_auto = Button(ax_btn2, 'Auto', color='white', hovercolor='0.9')
-        self.btn_auto.on_clicked(self.set_mode_auto)
-        
-        # 3. GRASP 按钮
-        ax_btn3 = plt.axes([0.23, 0.92, 0.08, 0.05])
-        self.btn_grasp = Button(ax_btn3, 'Grasp', color='white', hovercolor='0.9')
-        self.btn_grasp.on_clicked(self.set_mode_grasp)
-        
-        # 滑块配置
+        # 2. 滑块 (仅在 Manual 模式有效，但一直显示)
         self.sliders = []
-        slider_params = [
+        slider_configs = [
             ('J1 Base', -60, 60, 0),
-            ('J2 Shoulder', -28, 90, 0),
+            ('J2 Shldr', -28, 90, 0),
             ('J3 Elbow', -152, -42, -90),
-            # J4 Fixed
-            ('Soft Bend', -120, 120, 0),
-            ('Soft Phi', -180, 180, 0),
-            ('Soft Len', 140, 250, 180)
+            ('Bend', -120, 120, 0),
+            ('Phi', -180, 180, 0),
+            ('Len', 140, 250, 180)
         ]
         
-        start_y = 0.85
-        for i, (label, vmin, vmax, vinit) in enumerate(slider_params):
-            ax = plt.axes([0.05, start_y - i*0.06, 0.20, 0.03], facecolor=axcolor)
-            s = Slider(ax, label, vmin, vmax, valinit=vinit)
+        start_y = 0.55
+        for i, (lbl, vmin, vmax, vinit) in enumerate(slider_configs):
+            # 调整滑块位置和高度
+            ax = plt.axes([panel_left, start_y - i*0.06, panel_width, 0.03])
+            s = Slider(ax, lbl, vmin, vmax, valinit=vinit, valfmt='%0.0f')
+            s.label.set_fontsize(10)
             s.on_changed(self.on_slider_manual)
             self.sliders.append(s)
             
-        plt.figtext(0.05, 0.35, "Controls:\n[Grasp Mode]: Use ↑ ↓ ← → + - to move ball", fontsize=10)
+        # 说明文字
+        plt.figtext(panel_left, 0.15, "Controls:\n[IK/Traj Mode]:\nArrows: Move Center XY\n+/-: Move Center Z", fontsize=10, color='#333333')
 
-    # ================= 模式切换逻辑 =================
-    
-    def set_mode_manual(self, event):
-        self.change_mode('MANUAL')
+    # ================= 交互逻辑 =================
 
-    def set_mode_auto(self, event):
-        self.change_mode('AUTO')
-
-    def set_mode_grasp(self, event):
-        self.change_mode('GRASP')
-
-    def change_mode(self, new_mode):
-        self.current_mode = new_mode
-        self.update_button_colors() # 更新按钮颜色
+    def on_mode_change(self, label):
+        self.current_mode = label
+        self.time_step = 0.0 # 重置时间
+        self.text_info.set_text(f"Mode: {label}")
         
-        # 更新标题颜色和文字
-        self.title_text.set_text(f"Mode: {new_mode}")
-        if new_mode == 'MANUAL':
-            self.title_text.set_color('blue')
-            self.viz_target.set_color('gray')
-            self.viz_target.set_alpha(0.3)
-        elif new_mode == 'AUTO':
-            self.title_text.set_color('purple')
-            self.viz_target.set_color('gray')
-            self.viz_target.set_alpha(0.3)
-        elif new_mode == 'GRASP':
-            self.title_text.set_color('green')
-            self.viz_target.set_color('#32CD32')
-            self.viz_target.set_alpha(1.0)
-
-    def update_button_colors(self):
-        # 辅助函数：根据当前模式高亮对应按钮
-        active_color = 'lightblue'
-        inactive_color = 'white'
-        
-        self.btn_manual.color = active_color if self.current_mode == 'MANUAL' else inactive_color
-        self.btn_auto.color = active_color if self.current_mode == 'AUTO' else inactive_color
-        self.btn_grasp.color = active_color if self.current_mode == 'GRASP' else inactive_color
-        
-        # 强制重绘按钮
-        self.btn_manual.hovercolor = self.btn_manual.color
-        self.btn_auto.hovercolor = self.btn_auto.color
-        self.btn_grasp.hovercolor = self.btn_grasp.color
-
-    # ================= 其他逻辑 (保持不变) =================
+        if label.startswith('TRAJ'):
+            self.is_traj_running = True
+            traj_type = label.split('-')[1]
+            self.planner.type = traj_type
+            
+            # 绘制红线轨迹
+            path_pts = self.planner.get_path_points(traj_type)
+            self.viz_path.set_data(path_pts[:,0], path_pts[:,1])
+            self.viz_path.set_3d_properties(path_pts[:,2])
+            
+            self.viz_target.set_visible(True)
+            self.viz_path.set_visible(True)
+            
+        elif label == 'IK-POINT':
+            self.is_traj_running = False
+            self.viz_path.set_visible(False)
+            self.viz_target.set_visible(True)
+            self.target_pos = self.planner.center.copy()
+            
+        else: # MANUAL
+            self.is_traj_running = False
+            self.viz_path.set_visible(False)
+            self.viz_target.set_visible(False)
 
     def on_key_press(self, event):
-        if self.current_mode != 'GRASP': return
-        step = 5.0
+        if self.current_mode == 'MANUAL': return
+        
+        step = 10.0
         key = (event.key or '').lower()
-        # XY：方向键 或 小键盘 8/2/4/6
-        if key in ('up', '8'):
-            self.target_pos[0] += step
-        elif key in ('down', '2'):
-            self.target_pos[0] -= step
-        elif key in ('left', '4'):
-            self.target_pos[1] -= step
-        elif key in ('right', '6'):
-            self.target_pos[1] += step
-        # Z：小键盘 + / - （兼容多种键名）或主键盘 + / -
-        elif key in ('+', 'add', 'kp_add'):
-            self.target_pos[2] += step
-        elif key in ('-', 'subtract', 'kp_subtract'):
-            self.target_pos[2] -= step
-        # 保证高度不为负
-        self.target_pos[2] = max(0, self.target_pos[2])
+        
+        # 键盘控制中心点
+        if key in ('up', '8'):    self.planner.center[0] += step
+        elif key in ('down', '2'): self.planner.center[0] -= step
+        elif key in ('left', '4'): self.planner.center[1] -= step
+        elif key in ('right', '6'): self.planner.center[1] += step
+        elif key in ('+', 'equals'): self.planner.center[2] += step
+        elif key in ('-', 'minus'):  self.planner.center[2] -= step
+        
+        if not self.is_traj_running:
+            self.target_pos = self.planner.center.copy()
+            
+        if self.is_traj_running:
+            path_pts = self.planner.get_path_points(self.planner.type)
+            self.viz_path.set_data(path_pts[:,0], path_pts[:,1])
+            self.viz_path.set_3d_properties(path_pts[:,2])
 
     def on_slider_manual(self, val):
         if self.current_mode == 'MANUAL':
@@ -218,37 +237,48 @@ class UnifiedRobotController:
 
     def update_sliders_visual(self, q_vector):
         indices = [0, 1, 2, 4, 5, 6]
-        for i, slider_idx in enumerate(indices):
+        for i, idx in enumerate(indices):
             self.sliders[i].eventson = False
-            self.sliders[i].set_val(q_vector[slider_idx])
+            self.sliders[i].set_val(q_vector[idx])
             self.sliders[i].eventson = True
 
+    # ================= 主循环 =================
+    
     def update_loop(self, frame):
         self.time_step += 0.05
         
-        if self.current_mode == 'AUTO':
-            t = self.time_step
-            q1 = np.sin(t*0.1) * 45
-            q2 = np.sin(t*0.1 + 1) * 30 + 10
-            q3 = np.sin(t*0.1 + 2) * 40 - 90
-            bend = (np.sin(0.1*t)) * 80
-            bend = np.clip(bend, -120, 120)  # 限制弯曲度
-            phi = (t * 50) % 360 - 180
-            length = 180 + np.sin(t*2) * 40
-            self.current_q = [q1, q2, q3, 0, bend, phi, length]
-            self.update_sliders_visual(self.current_q)
+        # 1. 计算目标与IK
+        if self.is_traj_running:
+            traj_target = self.planner.calculate_pos(self.planner.type, self.time_step)
+            self.target_pos = traj_target
             
-        elif self.current_mode == 'GRASP':
-            self.current_q = self.ik_solver.solve(self.target_pos, self.current_q)
-            self.update_sliders_visual(self.current_q)
-            
-        # 绘图更新
+            sol = self.ik_solver.solve(self.target_pos, self.current_q)
+            if sol is not None:
+                self.current_q = sol
+                self.update_sliders_visual(self.current_q)
+                self.viz_target.set_color('lime')
+            else:
+                self.viz_target.set_color('red')
+                
+        elif self.current_mode == 'IK-POINT':
+            sol = self.ik_solver.solve(self.target_pos, self.current_q)
+            if sol is not None:
+                self.current_q = sol
+                self.update_sliders_visual(self.current_q)
+                self.viz_target.set_color('lime')
+            else:
+                self.viz_target.set_color('red')
+
+        # 2. 正向运动学绘图
         r_pts, s_pts, _, T_tip = self.arm_model.forward_kinematics(self.current_q)
         
+        # 更新组件位置
         self.viz_links.set_data(r_pts[0:4, 0], r_pts[0:4, 1])
         self.viz_links.set_3d_properties(r_pts[0:4, 2])
+        
         self.viz_fixed.set_data(r_pts[3:5, 0], r_pts[3:5, 1])
         self.viz_fixed.set_3d_properties(r_pts[3:5, 2])
+        
         self.viz_joints.set_data(r_pts[1:4, 0], r_pts[1:4, 1])
         self.viz_joints.set_3d_properties(r_pts[1:4, 2])
         
@@ -258,20 +288,27 @@ class UnifiedRobotController:
         self.viz_soft.set_data(sx, sy)
         self.viz_soft.set_3d_properties(sz)
         
-        # 更新末端坐标轴
-        axis_len = 50 # 坐标轴长度
-        origin = T_tip[:3, 3]
-        for i in range(3):
-            axis_vec = T_tip[:3, i]
-            end_point = origin + axis_len * axis_vec
-            line = self.viz_tip_axes[i]
-            line.set_data([origin[0], end_point[0]], [origin[1], end_point[1]])
-            line.set_3d_properties([origin[2], end_point[2]])
-
-        if self.current_mode == 'GRASP':
+        # 更新目标点
+        if self.current_mode != 'MANUAL':
             self.viz_target.set_data([self.target_pos[0]], [self.target_pos[1]])
             self.viz_target.set_3d_properties([self.target_pos[2]])
+
+        # --- 【恢复】更新末端坐标轴 ---
+        origin = T_tip[:3, 3]
+        rot_mat = T_tip[:3, :3]
+        axis_len = 80 # 坐标轴显示长度 (mm)
         
+        # 绘制 X, Y, Z 轴
+        # viz_tip_axes[0] -> X (Red), [1] -> Y (Green), [2] -> Z (Blue)
+        for i in range(3):
+            # 计算轴的终点：起点 + 旋转矩阵的第i列 * 长度
+            axis_vec = rot_mat[:, i] 
+            end_p = origin + axis_vec * axis_len
+            
+            line = self.viz_tip_axes[i]
+            line.set_data([origin[0], end_p[0]], [origin[1], end_p[1]])
+            line.set_3d_properties([origin[2], end_p[2]])
+            
         return self.viz_links, self.viz_soft
 
 if __name__ == "__main__":

@@ -13,8 +13,8 @@ class IKSolver:
         ]
         
         # 2. 软体臂参数限制
-        self.soft_len_range = [140.0, 250.0] # 长度 mm
-        self.soft_bend_max = 130.0           # 弯曲 deg
+        self.soft_len_range = [140.0, 200.0] # 长度 mm
+        self.soft_bend_max = 100.0           # 弯曲 deg
         
         # 3. 求解配置
         self.tolerance = 2.0  # 目标精度 mm
