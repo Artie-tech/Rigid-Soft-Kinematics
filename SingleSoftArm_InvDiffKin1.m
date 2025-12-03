@@ -18,10 +18,6 @@ function [l_dot, phi_dot, kappa_dot] = SingleSoftArm_InvDiffKin1(x_dot, y_dot, z
     % 计算投影半径
     r = sqrt(x^2 + y^2);
 
-    % 初始化输出
-    l_dot = 0;
-    phi_dot = 0;
-    kappa_dot = 0;
 
     % === 奇异性判断 ===
     if r < eps_r

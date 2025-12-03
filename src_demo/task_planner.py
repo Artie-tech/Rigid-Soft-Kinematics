@@ -37,7 +37,7 @@ class GraspTaskPlanner:
 
         # 初始化物体
         # 根据 pose_grasp 手算的大概位置放置物体，确保能抓到
-        self.target = TargetObject([950, 0, 100]) 
+        self.target = TargetObject([1200, 0, 100]) 
 
     def update(self, dt):
         """
