@@ -119,52 +119,82 @@ class IKSolver:
 
     def _solve_soft_geometric(self, target, rigid_q_deg, old_q_full):
         """
-        几何解析软体参数
-        old_q_full: 用于在奇异点(直线)时保持 Phi 不变
+        几何解析软体参数，并计算实机坐标系下的末端相对位置。
+        
+        输入:
+            target: 全局目标点 [x, y, z]
+            rigid_q_deg: 刚性臂当前角度 [j1, j2, j3]
+            old_q_full: 上一时刻的完整关节角 (用于处理奇异点 Phi 突变)
         """
-        # FK 获取软体基座坐标系
+        # --- 1. 获取软体基座坐标系 (Rigid FK) ---
+        # 构造临时的关节向量 (软体部分为0) 用于获取基座位置
         q_dummy = rigid_q_deg.tolist() + [0, 0, 0, 0]
         _, _, T_base, _ = self.model.forward_kinematics(q_dummy)
         
-        base_pos = T_base[:3, 3]
-        R_base = T_base[:3, :3]
+        base_pos = T_base[:3, 3] # 软体基座原点 (全局)
+        R_base = T_base[:3, :3]  # 软体基座姿态 (全局)
         
-        # 转到局部坐标系
-        vec_local = R_base.T @ (target - base_pos)
-        x, y, z = vec_local # x: 前进方向, y,z: 弯曲平面
+        # --- 2. 将目标点转换到软体基座局部坐标系 ---
+        # 向量 = 全局目标 - 基座原点
+        vec_global = target - base_pos
+        # 局部向量 = 基座旋转矩阵的逆 * 向量
+        vec_local = R_base.T @ vec_global
         
-        # --- 1. 计算 Phi (旋转角) ---
+        # 此时的 x, y, z 是基于仿真定义的 (X轴为伸长方向)
+        x, y, z = vec_local 
+        
+        # --- 3. 几何解算 (PCC 参数) ---
+        # h: 弯曲平面内的偏转距离 (y-z 平面的模长)
         h = np.sqrt(y**2 + z**2)
         
-        # 【优化】奇异点保护
+        # [A] 计算 Phi (旋转角)
         if h < 1e-3: 
-            # 几乎是直线，Phi 失去定义。保持上一时刻的 Phi 或设为 0
+            # 奇异点处理：当几乎是直线时，Phi 无定义，保持上一帧的值以防乱跳
             phi_deg = old_q_full[5] 
         else:
             phi_deg = np.degrees(np.arctan2(z, y))
             
-        # --- 2. 计算 Bend (弯曲角) & Length (弧长) ---
+        # [B] 计算 Bend (弯曲角) & Length (弧长)
         if h < 1e-3:
+            # 直线情况
             theta_rad = 0.0
-            arc_len = x
+            arc_len = x # 在直线时，x 轴分量即为长度
         else:
-            # PCC 几何公式
+            # 弯曲情况 (常曲率几何公式)
             # theta = 2 * atan(h / x)
             theta_rad = 2 * np.arctan2(h, x)
+            
+            # 防止除零 (虽然 h>1e-3 已经保证了，但加一层保险)
             if abs(theta_rad) < 1e-4:
                 arc_len = x
             else:
+                # 弦长 d = sqrt(x^2 + h^2)
+                # 曲率半径 R = d / (2 * sin(theta/2)) = (x^2+h^2)/(2h)
                 R = (x**2 + h**2) / (2*h)
                 arc_len = R * theta_rad
                 
-        # --- 3. 约束限位 ---
+        # --- 4. 约束限位 (Clamping) ---
         final_bend = np.clip(np.degrees(theta_rad), -self.soft_bend_max, self.soft_bend_max)
         final_len = np.clip(arc_len, self.soft_len_range[0], self.soft_len_range[1])
         
-        # 组合结果
+        # --- 5. 【新增】计算实机坐标系下的相对坐标 (Verify) ---
+        # 这里调用 robot_model 中的新函数
+        # to_real_z_axis=True 确保输出的是 Z 轴为伸长方向的坐标
+        real_tip_pos = self.model.get_soft_tip_in_base_frame(
+            final_bend, 
+            phi_deg, 
+            final_len, 
+            to_real_z_axis=True
+        )
+        
+        # [调试用] 打印计算出的实机坐标 (X=侧向, Y=向上, Z=伸长)
+        # print(f"[IK Geo] Bend:{final_bend:.1f}, Phi:{phi_deg:.1f} -> Real Tip: {real_tip_pos}")
+        
+        # --- 6. 组合结果并验证误差 ---
+        # 构造完整的 7 维关节向量
         res_q = np.array(rigid_q_deg.tolist() + [0, final_bend, phi_deg, final_len])
         
-        # 验证误差
+        # 计算正向运动学，检查最终到达的全局位置误差
         _, _, _, T_tip = self.model.forward_kinematics(res_q)
         error = np.linalg.norm(target - T_tip[:3, 3])
         

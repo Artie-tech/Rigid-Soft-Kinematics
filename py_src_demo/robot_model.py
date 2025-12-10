@@ -44,6 +44,42 @@ class HydraulicSoftArmKinematics:
             [0,     0,      0,    1]
         ])
 
+    def get_soft_tip_in_base_frame(self, bend_deg, phi_deg, length_mm, to_real_z_axis=True):
+        
+        theta = np.deg2rad(bend_deg)
+        phi = np.deg2rad(phi_deg)
+        
+        # --- 1. PCC 模型计算 (基于仿真坐标系: X轴为伸长方向) ---
+        if abs(theta) < 1e-4:
+            # 直线状态奇异点处理
+            p_sim = np.array([length_mm, 0.0, 0.0])
+        else:
+            # 几何推导
+            # R = L / theta
+            # x = R * sin(theta)
+            # y_plane = R * (1 - cos(theta))
+            R = length_mm / theta
+            
+            x_sim = R * np.sin(theta)
+            y_plane = R * (1 - np.cos(theta))
+            
+            # 加上 Phi 旋转
+            y_sim = y_plane * np.cos(phi)
+            z_sim = y_plane * np.sin(phi)
+            
+            p_sim = np.array([x_sim, y_sim, z_sim])
+            
+        # --- 2. 坐标系转换 ---
+        if to_real_z_axis:
+            # 仿真 Frame -> 实机 Frame
+            # Sim X (伸长) -> Real Z
+            # Sim Y (偏转) -> Real X
+            # Sim Z (偏转) -> Real Y
+            return np.array([p_sim[1], p_sim[2], p_sim[0]])
+        else:
+            return p_sim
+
+
     def forward_kinematics(self, q_degrees):
         """
         修正后的输入解析：
@@ -81,6 +117,7 @@ class HydraulicSoftArmKinematics:
         if abs(theta_bend) < 1e-4:
             for i in range(self.soft_segments + 1):
                 s = (i / self.soft_segments) * length_mm
+                # 注意这里：s (长度) 被赋值给了 x 坐标
                 soft_points_local.append([s, 0, 0, 1])
             # 末端局部变换 (纯平移)
             T_tip_local = np.eye(4)

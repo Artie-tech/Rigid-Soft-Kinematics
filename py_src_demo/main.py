@@ -48,15 +48,16 @@ class TrajectoryPlanner:
             
         elif traj_type == 'FIG8':
             scale = r * 1.2
+            x = self.center[0] 
             y = self.center[1] + scale * np.sin(w)
             z = self.center[2] + scale * np.sin(2 * w) / 2.0
-            x = self.center[0] 
+            
             
         elif traj_type == 'SPIRAL':
             r_spiral = r * 0.8
-            z = self.center[2] + r_spiral * np.sin(w)
-            y = self.center[1] + r_spiral * np.cos(w)
             x = self.center[0] + 100 * np.sin(2 * w)
+            y = self.center[1] + r_spiral * np.cos(w)
+            z = self.center[2] + r_spiral * np.sin(w)
             
         return np.array([x, y, z])
 
@@ -76,7 +77,7 @@ class UnifiedRobotController:
         self.is_traj_running = False
         
         # 3. 数据存储
-        self.current_q = [0, 0, -90, 0, 0, 0, 180] 
+        self.current_q = [0, 60, -90, 0, 0, 0, 180] 
         self.target_pos = self.planner.center.copy()
         
         # 4. 初始化绘图
@@ -137,6 +138,16 @@ class UnifiedRobotController:
         # 信息文本
         self.text_info = self.ax3d.text2D(0.02, 0.95, "Mode: MANUAL", transform=self.ax3d.transAxes, fontsize=14, color='blue')
 
+        self.text_soft_tip = self.ax3d.text2D(
+            0.02, 0.85, 
+            "Soft Tip: N/A", 
+            transform=self.ax3d.transAxes, 
+            fontsize=11, 
+            color='purple',
+            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none')
+        )
+
+
     def setup_ui(self):
         # 右侧控制面板区域设置
         panel_left = 0.72  # 向左移一点，变宽
@@ -158,7 +169,7 @@ class UnifiedRobotController:
         self.sliders = []
         slider_configs = [
             ('J1 Base', -60, 60, 0),
-            ('J2 Shldr', -28, 90, 0),
+            ('J2 Shoulder', -28, 90, 60),
             ('J3 Elbow', -152, -42, -90),
             ('Bend', -120, 120, 0),
             ('Phi', -180, 180, 0),
@@ -288,6 +299,29 @@ class UnifiedRobotController:
         self.viz_soft.set_data(sx, sy)
         self.viz_soft.set_3d_properties(sz)
         
+# 1. 提取当前软体参数 (Index 4=Bend, 5=Phi, 6=Len)
+        curr_bend = self.current_q[4]
+        curr_phi  = self.current_q[5]
+        curr_len  = self.current_q[6]
+        
+        # 2. 计算相对坐标 (开启 to_real_z_axis=True，让 Z 轴代表伸长方向)
+        # 这里的 self.arm_model 就是 robot_model.py 中的类实例
+        tip_local = self.arm_model.get_soft_tip_in_base_frame(
+            curr_bend, curr_phi, curr_len, to_real_z_axis=True
+        )
+        
+        # 3. 格式化显示的文本
+        # Real X: 侧向弯曲
+        # Real Y: 向上弯曲
+        # Real Z: 伸长方向
+        info_str = (
+            f"Soft Tip (Local):\n"
+            f"X: {tip_local[0]:6.1f} mm\n"
+            f"Y: {tip_local[1]:6.1f} mm\n"
+            f"Z: {tip_local[2]:6.1f} mm"
+        )
+        self.text_soft_tip.set_text(info_str)
+
         # 更新目标点
         if self.current_mode != 'MANUAL':
             self.viz_target.set_data([self.target_pos[0]], [self.target_pos[1]])
