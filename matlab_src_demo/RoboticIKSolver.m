@@ -1,3 +1,15 @@
+% 文件功能：通用机器人逆运动学求解器类
+%
+% 本文件定义了 RoboticIKSolver 类，实现了一个通用的、基于雅可比矩阵的
+% 迭代逆运动学 (IK) 算法。
+%
+% 主要特点：
+% - 适用于任何提供了正向运动学和雅可比计算的机器人模型。
+% - 采用阻尼最小二乘法 (DLS) 或雅可比伪逆法来计算关节增量，以提高在
+%   奇异点附近的稳定性。
+% - 包含迭代次数、容忍误差、步长等可配置参数。
+% - 核心方法是 solve，接收目标位姿和初始关节角，返回求解结果。
+
 classdef RoboticIKSolver
     % RoboticIKSolver 逆运动学求解器
     
@@ -68,6 +80,7 @@ classdef RoboticIKSolver
             if size(q,1) < size(q,2), q = q'; end % 确保列向量 (3x1)
             
             ideal_reach = mean(obj.SoftLenRange);
+            % ideal_reach = obj.SoftLenRange(1) + 5.0; 
             
             for iter = 1:15
                 % FK
@@ -173,19 +186,18 @@ classdef RoboticIKSolver
         end
         
         function [q_new, err_new] = global_refine(obj, target, q_start)
-            % 全局雅可比迭代微调
+            % 全局雅可比迭代微调 (Levenberg-Marquardt)
             q = q_start; 
             % 优化索引: 1,2,3 (Rigid), 5(Bend), 6(Phi), 7(Len)
             active_idx = [1, 2, 3, 5, 6, 7];
             
-            curr_err = inf;
+            [T_tip, ~] = obj.Model.forward_kinematics(q);
+            curr_pos = T_tip(1:3, 4);
+            curr_err = norm(target - curr_pos);
             
-            for iter = 1:5
-                [T_tip, ~] = obj.Model.forward_kinematics(q);
-                curr_pos = T_tip(1:3, 4);
-                err_vec = target - curr_pos;
-                curr_err = norm(err_vec);
-                
+            lambda = 0.01; % 初始阻尼因子
+            
+            for iter = 1:20
                 if curr_err < obj.Tolerance
                     break;
                 end
@@ -204,21 +216,46 @@ classdef RoboticIKSolver
                     J(:, k) = (T_tmp(1:3, 4) - curr_pos) / delta;
                 end
                 
-                % DLS
-                dq_active = pinv(J' * J + 0.5 * eye(6)) * J' * err_vec;
+                % LM 更新: (J'J + lambda*I) * dq = J' * err
+                err_vec = target - curr_pos;
+                H = J' * J;
+                g = J' * err_vec;
                 
+                % 针对不同关节量级，可以加权，这里简化处理
+                dq_active = (H + lambda * eye(6)) \ g;
+                
+                % 试探更新
+                q_trial = q;
                 for k = 1:6
                     idx = active_idx(k);
-                    q(idx) = q(idx) + dq_active(k);
+                    q_trial(idx) = q_trial(idx) + dq_active(k);
                 end
                 
-                % 简单限位保护 (Rigid)
+                % 限位保护
                 for i = 1:3
-                    q(i) = max(min(q(i), rad2deg(obj.LimitsRad(i,2))), rad2deg(obj.LimitsRad(i,1)));
+                    q_trial(i) = max(min(q_trial(i), rad2deg(obj.LimitsRad(i,2))), rad2deg(obj.LimitsRad(i,1)));
                 end
-                % Soft
-                q(5) = max(min(q(5), obj.SoftBendMax), -obj.SoftBendMax);
-                q(7) = max(min(q(7), obj.SoftLenRange(2)), obj.SoftLenRange(1));
+                q_trial(5) = max(min(q_trial(5), obj.SoftBendMax), -obj.SoftBendMax);
+                q_trial(7) = max(min(q_trial(7), obj.SoftLenRange(2)), obj.SoftLenRange(1));
+                
+                % 检查误差是否减小
+                [T_trial, ~] = obj.Model.forward_kinematics(q_trial);
+                pos_trial = T_trial(1:3, 4);
+                err_trial = norm(target - pos_trial);
+                
+                if err_trial < curr_err
+                    % 接受更新
+                    q = q_trial;
+                    curr_err = err_trial;
+                    curr_pos = pos_trial;
+                    lambda = lambda / 5.0; % 减小阻尼
+                else
+                    % 拒绝更新
+                    lambda = lambda * 5.0; % 增大阻尼
+                    if lambda > 1e5
+                        break; % 阻尼过大，无法收敛
+                    end
+                end
             end
             
             q_new = q;

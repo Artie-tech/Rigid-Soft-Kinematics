@@ -1,9 +1,21 @@
+% 文件功能：液压刚柔耦合机械臂运动学模型
+%
+% 本文件定义了 HydraulicSoftArm 类，用于描述一个包含刚性连杆和末端软体执行器的
+% 机械臂。
+%
+% 主要功能：
+% 1. 定义机械臂的结构参数，包括刚性部分的 D-H (Denavit-Hartenberg) 参数和
+%    软体部分的几何参数。
+% 2. 实现正向运动学 (forwardKinematics)，根据输入的关节角度（刚性+软体），
+%    计算出机械臂各关节点的位置以及末端执行器的位姿。
+% 3. 采用分段常曲率 (PCC) 模型来描述软体部分的形状。
+
 classdef HydraulicSoftArm
     % HydraulicSoftArm 机器人运动学模型
     % 包含刚性臂 D-H 参数和软体臂 PCC 模型
     
     properties
-        BaseZOffset = 500.0; % mm
+        BaseZOffset = 0.0; % mm
         
         % D-H 参数结构体数组 (Link 1-4)
         % theta 在运行时输入，这里存储 alpha, a, d

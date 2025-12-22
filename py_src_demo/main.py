@@ -173,7 +173,7 @@ class UnifiedRobotController:
             ('J3 Elbow', -152, -42, -90),
             ('Bend', -120, 120, 0),
             ('Phi', -180, 180, 0),
-            ('Len', 140, 250, 180)
+            ('Len', 140, 250, 140)
         ]
         
         start_y = 0.55
