@@ -80,11 +80,9 @@ classdef RoboticIKSolver
             if size(q,1) < size(q,2), q = q'; end % 确保列向量 (3x1)
             
             ideal_reach = mean(obj.SoftLenRange);
-            % ideal_reach = obj.SoftLenRange(1) + 5.0; 
-            
+                        
             for iter = 1:15
                 % FK
-                % 【修复】这里去掉了 q' 的转置，保持 q 为列向量 (3x1)，与下面的标量垂直拼接
                 q_full = [rad2deg(q); 0; 0; 0; 140]; 
                 
                 [~, T_base] = obj.Model.forward_kinematics(q_full);
@@ -111,7 +109,6 @@ classdef RoboticIKSolver
                     q_tmp = q;
                     q_tmp(i) = q_tmp(i) + delta;
                     
-                    % 【修复】这里也去掉了 q_tmp' 的转置
                     q_full_tmp = [rad2deg(q_tmp); 0; 0; 0; 140];
                     
                     [~, T_b_tmp] = obj.Model.forward_kinematics(q_full_tmp);

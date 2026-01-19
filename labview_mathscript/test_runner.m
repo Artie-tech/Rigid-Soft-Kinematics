@@ -9,7 +9,7 @@
 clc; clear; format compact;
 
 fprintf('=== 液压软体臂 IK 综合测试 (LabView 接口版) ===\n');
-fprintf('当前时间: %s\n\n', datestr(now));
+fprintf('当前时间: %s\n\n', datetime("now", "Format", "yyyy-MM-dd HH:mm:ss"));
 
 % --- 1. 定义测试用例 (Ground Truth) ---
 % 格式: [q1, q2, q3, fixed(0), bend, phi, len]
